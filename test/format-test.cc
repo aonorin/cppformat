@@ -1324,6 +1324,11 @@ TEST(FormatterTest, FormatChar) {
   EXPECT_EQ(fmt::format("{:02X}", n), fmt::format("{:02X}", 'x'));
 }
 
+TEST(FormatterTest, FormatUnsignedChar) {
+  EXPECT_EQ("42", format("{}", static_cast<unsigned char>(42)));
+  EXPECT_EQ("42", format("{}", static_cast<uint8_t>(42)));
+}
+
 TEST(FormatterTest, FormatWChar) {
   EXPECT_EQ(L"a", format(L"{0}", L'a'));
   // This shouldn't compile:
@@ -1331,7 +1336,7 @@ TEST(FormatterTest, FormatWChar) {
 }
 
 TEST(FormatterTest, FormatCString) {
-  check_unknown_types("test", "s", "string");
+  check_unknown_types("test", "sp", "string");
   EXPECT_EQ("test", format("{0}", "test"));
   EXPECT_EQ("test", format("{0:s}", "test"));
   char nonconst[] = "nonconst";
@@ -1632,3 +1637,24 @@ TEST(LiteralsTest, NamedArg) {
             udl_a_w);
 }
 #endif // FMT_USE_USER_DEFINED_LITERALS
+
+enum TestEnum {};
+std::ostream &operator<<(std::ostream &os, TestEnum) {
+  return os << "TestEnum";
+}
+
+enum TestEnum2 { A };
+
+TEST(FormatTest, Enum) {
+  EXPECT_EQ("TestEnum", fmt::format("{}", TestEnum()));
+  EXPECT_EQ("0", fmt::format("{}", A));
+}
+
+struct EmptyTest {};
+std::ostream &operator<<(std::ostream &os, EmptyTest) {
+  return os << "";
+}
+
+TEST(FormatTest, EmptyCustomOutput) {
+  EXPECT_EQ("", fmt::format("{}", EmptyTest()));
+}
