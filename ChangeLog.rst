@@ -1,3 +1,50 @@
+2.1.1 - 2016-04-11
+------------------
+
+* The install location for generated CMake files is now configurable via
+  the ``FMT_CMAKE_DIR`` CMake variable
+  (`#299 <https://github.com/cppformat/cppformat/pull/299>`_).
+  Thanks to `@niosHD <https://github.com/niosHD>`_.
+
+* Documentation fixes (`#252 <https://github.com/cppformat/cppformat/issues/252>`_).
+
+2.1.0 - 2016-03-21
+------------------
+
+* Project layout and build system improvements
+  (`#267 <https://github.com/cppformat/cppformat/pull/267>`_):
+
+  * The code have been moved to the ``cppformat`` directory.
+    Including ``format.h`` from the top-level directory is deprecated
+    but works via a proxy header which will be removed in the next
+    major version.
+
+  * C++ Format CMake targets now have proper interface definitions.
+
+  * Installed version of the library now supports the header-only
+    configuration.
+
+  * Targets ``doc``, ``install``, and ``test`` are now disabled if C++ Format
+    is included as a CMake subproject. They can be enabled by setting
+    ``FMT_DOC``, ``FMT_INSTALL``, and ``FMT_TEST`` in the parent project.
+
+  Thanks to `@niosHD <https://github.com/niosHD>`_.
+
+2.0.1 - 2016-03-13
+------------------
+
+* Improved CMake find and package support
+  (`#264 <https://github.com/cppformat/cppformat/issues/264>`_).
+  Thanks to `@niosHD <https://github.com/niosHD>`_.
+
+* Fix compile error with Android NDK and mingw32
+  (`#241 <https://github.com/cppformat/cppformat/issues/241>`_).
+  Thanks to `@Gachapen (Magnus Bjerke Vik) <https://github.com/Gachapen>`_.
+
+* Documentation fixes
+  (`#248 <https://github.com/cppformat/cppformat/issues/248>`_,
+  `#260 <https://github.com/cppformat/cppformat/issues/260>`_).
+
 2.0.0 - 2015-12-01
 ------------------
 

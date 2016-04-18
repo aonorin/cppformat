@@ -29,13 +29,16 @@
 #include "test-assert.h"
 
 // Include format.cc instead of format.h to test implementation-specific stuff.
-#include "format.cc"
+#include "cppformat/format.cc"
 
+#include <algorithm>
 #include <cstring>
 
+#include "gmock/gmock.h"
 #include "gtest-extra.h"
 #include "util.h"
 
+#undef min
 #undef max
 
 TEST(FormatTest, ArgConverter) {
@@ -59,7 +62,8 @@ TEST(FormatTest, StrError) {
   char *message = 0;
   char buffer[BUFFER_SIZE];
   EXPECT_ASSERT(fmt::safe_strerror(EDOM, message = 0, 0), "invalid buffer");
-  EXPECT_ASSERT(fmt::safe_strerror(EDOM, message = buffer, 0), "invalid buffer");
+  EXPECT_ASSERT(fmt::safe_strerror(EDOM, message = buffer, 0),
+                "invalid buffer");
   buffer[0] = 'x';
 #if defined(_GNU_SOURCE) && !defined(__COVERITY__)
   // Use invalid error code to make sure that safe_strerror returns an error
@@ -101,13 +105,73 @@ TEST(FormatTest, FormatErrorCode) {
     fmt::format_error_code(w, 42, prefix);
     EXPECT_EQ(msg, w.str());
   }
-  {
+  int codes[] = {42, -1};
+  for (std::size_t i = 0, n = sizeof(codes) / sizeof(*codes); i < n; ++i) {
+    // Test maximum buffer size.
+    msg = fmt::format("error {}", codes[i]);
     fmt::MemoryWriter w;
     std::string prefix(
         fmt::internal::INLINE_BUFFER_SIZE - msg.size() - sep.size(), 'x');
-    fmt::format_error_code(w, 42, prefix);
+    fmt::format_error_code(w, codes[i], prefix);
     EXPECT_EQ(prefix + sep + msg, w.str());
     std::size_t size = fmt::internal::INLINE_BUFFER_SIZE;
     EXPECT_EQ(size, w.size());
+    w.clear();
+    // Test with a message that doesn't fit into the buffer.
+    prefix += 'x';
+    fmt::format_error_code(w, codes[i], prefix);
+    EXPECT_EQ(msg, w.str());
   }
+}
+
+TEST(FormatTest, WriteToOStream) {
+  std::ostringstream os;
+  fmt::MemoryWriter w;
+  w << "foo";
+  fmt::write(os, w);
+  EXPECT_EQ("foo", os.str());
+}
+
+TEST(FormatTest, WriteToOStreamMaxSize) {
+  std::size_t max_size = std::numeric_limits<std::size_t>::max();
+  std::streamsize max_streamsize = std::numeric_limits<std::streamsize>::max();
+  if (max_size <= fmt::internal::to_unsigned(max_streamsize))
+    return;
+
+  class TestWriter : public fmt::BasicWriter<char> {
+   private:
+    struct TestBuffer : fmt::Buffer<char> {
+      explicit TestBuffer(std::size_t size) { size_ = size; }
+      void grow(std::size_t) {}
+    } buffer_;
+   public:
+    explicit TestWriter(std::size_t size)
+      : fmt::BasicWriter<char>(buffer_), buffer_(size) {}
+  } w(max_size);
+
+  struct MockStreamBuf : std::streambuf {
+    MOCK_METHOD2(xsputn, std::streamsize (const void *s, std::streamsize n));
+    std::streamsize xsputn(const char *s, std::streamsize n) {
+      const void *v = s;
+      return xsputn(v, n);
+    }
+  } buffer;
+
+  struct TestOStream : std::ostream {
+    explicit TestOStream(MockStreamBuf &buffer) : std::ostream(&buffer) {}
+  } os(buffer);
+
+  testing::InSequence sequence;
+  const char *data = 0;
+  std::size_t size = max_size;
+  do {
+    typedef fmt::internal::MakeUnsigned<std::streamsize>::Type UStreamSize;
+    UStreamSize n = std::min<UStreamSize>(
+          size, fmt::internal::to_unsigned(max_streamsize));
+    EXPECT_CALL(buffer, xsputn(data, static_cast<std::streamsize>(n)))
+        .WillOnce(testing::Return(max_streamsize));
+    data += n;
+    size -= static_cast<std::size_t>(n);
+  } while (size != 0);
+  fmt::write(os, w);
 }

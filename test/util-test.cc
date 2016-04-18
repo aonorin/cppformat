@@ -47,7 +47,7 @@
 # include <windows.h>
 #endif
 
-#include "format.h"
+#include "cppformat/format.h"
 
 #undef max
 
@@ -332,8 +332,9 @@ TEST(MemoryBufferTest, Grow) {
     void grow(std::size_t size) { Base::grow(size); }
   } buffer((Allocator(&alloc)));
   buffer.resize(7);
+  using fmt::internal::to_unsigned;
   for (int i = 0; i < 7; ++i)
-    buffer[i] = i * i;
+    buffer[to_unsigned(i)] = i * i;
   EXPECT_EQ(10u, buffer.capacity());
   int mem[20];
   mem[7] = 0xdead;
@@ -342,7 +343,7 @@ TEST(MemoryBufferTest, Grow) {
   EXPECT_EQ(20u, buffer.capacity());
   // Check if size elements have been copied
   for (int i = 0; i < 7; ++i)
-    EXPECT_EQ(i * i, buffer[i]);
+    EXPECT_EQ(i * i, buffer[to_unsigned(i)]);
   // and no more than that.
   EXPECT_EQ(0xdead, buffer[7]);
   EXPECT_CALL(alloc, deallocate(mem, 20));
@@ -410,7 +411,7 @@ struct ArgInfo;
   template <> \
   struct ArgInfo<Arg::type_code> { \
     static Type get(const Arg &arg) { return arg.field; } \
-  };
+  }
 
 ARG_INFO(INT, int, int_value);
 ARG_INFO(UINT, unsigned, uint_value);
@@ -870,6 +871,27 @@ TEST(UtilTest, FormatWindowsError) {
         actual_message, ERROR_FILE_EXISTS,
         fmt::StringRef(0, std::numeric_limits<size_t>::max()));
   EXPECT_EQ(fmt::format("error {}", ERROR_FILE_EXISTS), actual_message.str());
+}
+
+TEST(UtilTest, FormatLongWindowsError) {
+  LPWSTR message = 0;
+  // this error code is not available on all Windows platforms and
+  // Windows SDKs, so do not fail the test if the error string cannot
+  // be retrieved.
+  const int provisioning_not_allowed = 0x80284013L /*TBS_E_PROVISIONING_NOT_ALLOWED*/;
+  if (FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, 0,
+      provisioning_not_allowed, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      reinterpret_cast<LPWSTR>(&message), 0, 0) == 0) {
+    return;
+  }
+  fmt::internal::UTF16ToUTF8 utf8_message(message);
+  LocalFree(message);
+  fmt::MemoryWriter actual_message;
+  fmt::internal::format_windows_error(
+      actual_message, provisioning_not_allowed, "test");
+  EXPECT_EQ(fmt::format("test: {}", utf8_message.str()),
+      actual_message.str());
 }
 
 TEST(UtilTest, WindowsError) {
