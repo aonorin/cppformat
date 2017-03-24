@@ -31,10 +31,7 @@
 #include <clocale>
 #include <cmath>
 #include <cstring>
-#include <fstream>
-#include <iomanip>
 #include <memory>
-#include <sstream>
 #include <stdint.h>
 
 #if FMT_USE_TYPE_TRAITS
@@ -46,7 +43,24 @@
 // Test that the library compiles if None is defined to 0 as done by xlib.h.
 #define None 0
 
-#include "cppformat/format.h"
+struct LocaleMock {
+  static LocaleMock *instance;
+
+  MOCK_METHOD0(localeconv, lconv *());
+} *LocaleMock::instance;
+
+namespace fmt {
+namespace std {
+using namespace ::std;
+lconv *localeconv() {
+  return LocaleMock::instance ?
+        LocaleMock::instance->localeconv() : ::std::localeconv();
+}
+}
+}
+
+#include "fmt/format.h"
+
 #include "util.h"
 #include "mock-allocator.h"
 #include "gtest-extra.h"
@@ -236,7 +250,7 @@ TEST(WriterTest, Allocator) {
   std::size_t size =
       static_cast<std::size_t>(1.5 * fmt::internal::INLINE_BUFFER_SIZE);
   std::vector<char> mem(size);
-  EXPECT_CALL(alloc, allocate(size)).WillOnce(testing::Return(&mem[0]));
+  EXPECT_CALL(alloc, allocate(size, 0)).WillOnce(testing::Return(&mem[0]));
   for (int i = 0; i < fmt::internal::INLINE_BUFFER_SIZE + 1; ++i)
     w << '*';
   EXPECT_CALL(alloc, deallocate(&mem[0], size));
@@ -384,30 +398,10 @@ TEST(WriterTest, hexu) {
   EXPECT_EQ("DEADBEEF", (MemoryWriter() << hexu(0xdeadbeefull)).str());
 }
 
-class Date {
-  int year_, month_, day_;
- public:
-  Date(int year, int month, int day) : year_(year), month_(month), day_(day) {}
-
-  int year() const { return year_; }
-  int month() const { return month_; }
-  int day() const { return day_; }
-
-  friend std::ostream &operator<<(std::ostream &os, const Date &d) {
-    os << d.year_ << '-' << d.month_ << '-' << d.day_;
-    return os;
-  }
-
-  friend std::wostream &operator<<(std::wostream &os, const Date &d) {
-    os << d.year_ << L'-' << d.month_ << L'-' << d.day_;
-    return os;
-  }
-
-  template <typename Char>
-  friend BasicWriter<Char> &operator<<(BasicWriter<Char> &f, const Date &d) {
-    return f << d.year_ << '-' << d.month_ << '-' << d.day_;
-  }
-};
+template <typename Char>
+BasicWriter<Char> &operator<<(BasicWriter<Char> &f, const Date &d) {
+  return f << d.year() << '-' << d.month() << '-' << d.day();
+}
 
 class ISO8601DateFormatter {
  const Date *date_;
@@ -663,7 +657,6 @@ TEST(FormatterTest, LeftAlign) {
   EXPECT_EQ("c    ", format("{0:<5}", 'c'));
   EXPECT_EQ("abc  ", format("{0:<5}", "abc"));
   EXPECT_EQ("0xface  ", format("{0:<8}", reinterpret_cast<void*>(0xface)));
-  EXPECT_EQ("def  ", format("{0:<5}", TestString("def")));
 }
 
 TEST(FormatterTest, RightAlign) {
@@ -681,7 +674,6 @@ TEST(FormatterTest, RightAlign) {
   EXPECT_EQ("    c", format("{0:>5}", 'c'));
   EXPECT_EQ("  abc", format("{0:>5}", "abc"));
   EXPECT_EQ("  0xface", format("{0:>8}", reinterpret_cast<void*>(0xface)));
-  EXPECT_EQ("  def", format("{0:>5}", TestString("def")));
 }
 
 TEST(FormatterTest, NumericAlign) {
@@ -707,8 +699,6 @@ TEST(FormatterTest, NumericAlign) {
       FormatError, "format specifier '=' requires numeric argument");
   EXPECT_THROW_MSG(format("{0:=8}", reinterpret_cast<void*>(0xface)),
       FormatError, "format specifier '=' requires numeric argument");
-  EXPECT_THROW_MSG(format("{0:=5}", TestString("def")),
-      FormatError, "format specifier '=' requires numeric argument");
 }
 
 TEST(FormatterTest, CenterAlign) {
@@ -726,7 +716,6 @@ TEST(FormatterTest, CenterAlign) {
   EXPECT_EQ("  c  ", format("{0:^5}", 'c'));
   EXPECT_EQ(" abc  ", format("{0:^6}", "abc"));
   EXPECT_EQ(" 0xface ", format("{0:^8}", reinterpret_cast<void*>(0xface)));
-  EXPECT_EQ(" def ", format("{0:^5}", TestString("def")));
 }
 
 TEST(FormatterTest, Fill) {
@@ -746,7 +735,6 @@ TEST(FormatterTest, Fill) {
   EXPECT_EQ("c****", format("{0:*<5}", 'c'));
   EXPECT_EQ("abc**", format("{0:*<5}", "abc"));
   EXPECT_EQ("**0xface", format("{0:*>8}", reinterpret_cast<void*>(0xface)));
-  EXPECT_EQ("def**", format("{0:*<5}", TestString("def")));
 }
 
 TEST(FormatterTest, PlusSign) {
@@ -770,8 +758,6 @@ TEST(FormatterTest, PlusSign) {
   EXPECT_THROW_MSG(format("{0:+}", "abc"),
       FormatError, "format specifier '+' requires numeric argument");
   EXPECT_THROW_MSG(format("{0:+}", reinterpret_cast<void*>(0x42)),
-      FormatError, "format specifier '+' requires numeric argument");
-  EXPECT_THROW_MSG(format("{0:+}", TestString()),
       FormatError, "format specifier '+' requires numeric argument");
 }
 
@@ -797,8 +783,6 @@ TEST(FormatterTest, MinusSign) {
       FormatError, "format specifier '-' requires numeric argument");
   EXPECT_THROW_MSG(format("{0:-}", reinterpret_cast<void*>(0x42)),
       FormatError, "format specifier '-' requires numeric argument");
-  EXPECT_THROW_MSG(format("{0:-}", TestString()),
-      FormatError, "format specifier '-' requires numeric argument");
 }
 
 TEST(FormatterTest, SpaceSign) {
@@ -822,8 +806,6 @@ TEST(FormatterTest, SpaceSign) {
   EXPECT_THROW_MSG(format("{0: }", "abc"),
       FormatError, "format specifier ' ' requires numeric argument");
   EXPECT_THROW_MSG(format("{0: }", reinterpret_cast<void*>(0x42)),
-      FormatError, "format specifier ' ' requires numeric argument");
-  EXPECT_THROW_MSG(format("{0: }", TestString()),
       FormatError, "format specifier ' ' requires numeric argument");
 }
 
@@ -870,8 +852,6 @@ TEST(FormatterTest, HashFlag) {
       FormatError, "format specifier '#' requires numeric argument");
   EXPECT_THROW_MSG(format("{0:#}", reinterpret_cast<void*>(0x42)),
       FormatError, "format specifier '#' requires numeric argument");
-  EXPECT_THROW_MSG(format("{0:#}", TestString()),
-      FormatError, "format specifier '#' requires numeric argument");
 }
 
 TEST(FormatterTest, ZeroFlag) {
@@ -891,8 +871,6 @@ TEST(FormatterTest, ZeroFlag) {
   EXPECT_THROW_MSG(format("{0:05}", "abc"),
       FormatError, "format specifier '0' requires numeric argument");
   EXPECT_THROW_MSG(format("{0:05}", reinterpret_cast<void*>(0x42)),
-      FormatError, "format specifier '0' requires numeric argument");
-  EXPECT_THROW_MSG(format("{0:05}", TestString()),
       FormatError, "format specifier '0' requires numeric argument");
 }
 
@@ -921,7 +899,6 @@ TEST(FormatterTest, Width) {
   EXPECT_EQ("    0xcafe", format("{0:10}", reinterpret_cast<void*>(0xcafe)));
   EXPECT_EQ("x          ", format("{0:11}", 'x'));
   EXPECT_EQ("str         ", format("{0:12}", "str"));
-  EXPECT_EQ("test         ", format("{0:13}", TestString("test")));
 }
 
 TEST(FormatterTest, RuntimeWidth) {
@@ -955,7 +932,7 @@ TEST(FormatterTest, RuntimeWidth) {
       FormatError, "number is too big");
   EXPECT_THROW_MSG(format("{0:{1}}", 0, -1l),
       FormatError, "negative width");
-  if (fmt::internal::check(sizeof(long) > sizeof(int))) {
+  if (fmt::internal::const_check(sizeof(long) > sizeof(int))) {
     long value = INT_MAX;
     EXPECT_THROW_MSG(format("{0:{1}}", 0, (value + 1)),
         FormatError, "number is too big");
@@ -980,7 +957,6 @@ TEST(FormatterTest, RuntimeWidth) {
             format("{0:{1}}", reinterpret_cast<void*>(0xcafe), 10));
   EXPECT_EQ("x          ", format("{0:{1}}", 'x', 11));
   EXPECT_EQ("str         ", format("{0:{1}}", "str", 12));
-  EXPECT_EQ("test         ", format("{0:{1}}", TestString("test"), 13));
 }
 
 TEST(FormatterTest, Precision) {
@@ -1040,7 +1016,6 @@ TEST(FormatterTest, Precision) {
       FormatError, "precision not allowed in pointer format specifier");
 
   EXPECT_EQ("st", format("{0:.2}", "str"));
-  EXPECT_EQ("te", format("{0:.2}", TestString("test")));
 }
 
 TEST(FormatterTest, RuntimePrecision) {
@@ -1076,7 +1051,7 @@ TEST(FormatterTest, RuntimePrecision) {
       FormatError, "number is too big");
   EXPECT_THROW_MSG(format("{0:.{1}}", 0, -1l),
       FormatError, "negative precision");
-  if (fmt::internal::check(sizeof(long) > sizeof(int))) {
+  if (fmt::internal::const_check(sizeof(long) > sizeof(int))) {
     long value = INT_MAX;
     EXPECT_THROW_MSG(format("{0:.{1}}", 0, (value + 1)),
         FormatError, "number is too big");
@@ -1124,7 +1099,6 @@ TEST(FormatterTest, RuntimePrecision) {
       FormatError, "precision not allowed in pointer format specifier");
 
   EXPECT_EQ("st", format("{0:.{1}}", "str", 2));
-  EXPECT_EQ("te", format("{0:.{1}}", TestString("test"), 2));
 }
 
 template <typename T>
@@ -1250,13 +1224,14 @@ TEST(FormatterTest, FormatOct) {
 }
 
 TEST(FormatterTest, FormatIntLocale) {
-#ifndef _WIN32
-  const char *locale = "en_US.utf-8";
-#else
-  const char *locale = "English_United States";
-#endif
-  std::setlocale(LC_ALL, locale);
-  EXPECT_EQ("1,234,567", format("{:n}", 1234567));
+  ScopedMock<LocaleMock> mock;
+  lconv lc = lconv();
+  char sep[] = "--";
+  lc.thousands_sep = sep;
+  EXPECT_CALL(mock, localeconv()).Times(3).WillRepeatedly(testing::Return(&lc));
+  EXPECT_EQ("123", format("{:n}", 123));
+  EXPECT_EQ("1--234", format("{:n}", 1234));
+  EXPECT_EQ("1--234--567", format("{:n}", 1234567));
 }
 
 TEST(FormatterTest, FormatFloat) {
@@ -1368,6 +1343,8 @@ TEST(FormatterTest, FormatUCharString) {
   EXPECT_EQ("test", format("{0:s}", str));
   const unsigned char *const_str = str;
   EXPECT_EQ("test", format("{0:s}", const_str));
+  unsigned char *ptr = str;
+  EXPECT_EQ("test", format("{0:s}", ptr));
 }
 
 TEST(FormatterTest, FormatPointer) {
@@ -1391,20 +1368,20 @@ TEST(FormatterTest, FormatCStringRef) {
   EXPECT_EQ("test", format("{0}", CStringRef("test")));
 }
 
-TEST(FormatterTest, FormatUsingIOStreams) {
-  EXPECT_EQ("a string", format("{0}", TestString("a string")));
-  std::string s = format("The date is {0}", Date(2012, 12, 9));
-  EXPECT_EQ("The date is 2012-12-9", s);
+void format_arg(fmt::BasicFormatter<char> &f, const char *, const Date &d) {
+  f.writer() << d.year() << '-' << d.month() << '-' << d.day();
+}
+
+TEST(FormatterTest, FormatCustom) {
   Date date(2012, 12, 9);
-  check_unknown_types(date, "s", "string");
-  EXPECT_EQ(L"The date is 2012-12-9",
-            format(L"The date is {0}", Date(2012, 12, 9)));
+  EXPECT_THROW_MSG(fmt::format("{:s}", date), FormatError,
+                   "unmatched '}' in format string");
 }
 
 class Answer {};
 
 template <typename Char>
-void format(fmt::BasicFormatter<Char> &f, const Char *, Answer) {
+void format_arg(fmt::BasicFormatter<Char> &f, const Char *, Answer) {
   f.writer() << "42";
 }
 
@@ -1561,9 +1538,6 @@ TEST(FormatTest, Print) {
   EXPECT_WRITE(stderr,
       fmt::print(stderr, "Don't {}!", "panic"), "Don't panic!");
 #endif
-  std::ostringstream os;
-  fmt::print(os, "Don't {}!", "panic");
-  EXPECT_EQ("Don't panic!", os.str());
 }
 
 #if FMT_USE_FILE_DESCRIPTORS
@@ -1576,6 +1550,27 @@ TEST(FormatTest, PrintColored) {
 TEST(FormatTest, Variadic) {
   EXPECT_EQ("abc1", format("{}c{}", "ab", 1));
   EXPECT_EQ(L"abc1", format(L"{}c{}", L"ab", 1));
+}
+
+TEST(FormatTest, JoinArg) {
+  using fmt::join;
+  int v1[3] = { 1, 2, 3 };
+  std::vector<float> v2;
+  v2.push_back(1.2);
+  v2.push_back(3.4);
+
+  EXPECT_EQ("(1, 2, 3)", format("({})", join(v1 + 0, v1 + 3, ", ")));
+  EXPECT_EQ("(1)", format("({})", join(v1 + 0, v1 + 1, ", ")));
+  EXPECT_EQ("()", format("({})", join(v1 + 0, v1 + 0, ", ")));
+  EXPECT_EQ("(001, 002, 003)", format("({:03})", join(v1 + 0, v1 + 3, ", ")));
+  EXPECT_EQ("(+01.20, +03.40)", format("({:+06.2f})", join(v2.begin(), v2.end(), ", ")));
+
+  EXPECT_EQ(L"(1, 2, 3)", format(L"({})", join(v1 + 0, v1 + 3, L", ")));
+
+#if FMT_HAS_GXX_CXX11
+  EXPECT_EQ("(1, 2, 3)", format("({})", join(v1, ", ")));
+  EXPECT_EQ("(+01.20, +03.40)", format("({:+06.2f})", join(v2, ", ")));
+#endif
 }
 
 template <typename T>
@@ -1649,29 +1644,14 @@ TEST(LiteralsTest, NamedArg) {
 }
 #endif // FMT_USE_USER_DEFINED_LITERALS
 
-enum TestEnum {};
-std::ostream &operator<<(std::ostream &os, TestEnum) {
-  return os << "TestEnum";
-}
-
-enum TestEnum2 { A };
+enum TestEnum { A };
 
 TEST(FormatTest, Enum) {
-  EXPECT_EQ("TestEnum", fmt::format("{}", TestEnum()));
   EXPECT_EQ("0", fmt::format("{}", A));
 }
 
-struct EmptyTest {};
-std::ostream &operator<<(std::ostream &os, EmptyTest) {
-  return os << "";
-}
-
-TEST(FormatTest, EmptyCustomOutput) {
-  EXPECT_EQ("", fmt::format("{}", EmptyTest()));
-}
-
 class MockArgFormatter :
-    public fmt::internal::ArgFormatterBase<MockArgFormatter, char>  {
+    public fmt::internal::ArgFormatterBase<MockArgFormatter, char> {
  public:
   typedef fmt::internal::ArgFormatterBase<MockArgFormatter, char> Base;
 
@@ -1693,4 +1673,11 @@ FMT_VARIADIC(void, custom_format, const char *)
 
 TEST(FormatTest, CustomArgFormatter) {
   custom_format("{}", 42);
+}
+
+void convert(int);
+
+// Check if there is no collision with convert function in the global namespace.
+TEST(FormatTest, ConvertCollision) {
+  fmt::format("{}", 42);
 }
